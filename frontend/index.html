@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CodeLens — Interactive Code Review</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0B0F17;
+      --surface: #111827;
+      --elevated: #1A2233;
+      --border: #263045;
+      --text: #F3F4F6;
+      --muted: #9CA3AF;
+      --accent: #7C6CFF;
+      --accent-cyan: #22D3EE;
+      --sev-critical: #EF4444;
+      --sev-high: #F97316;
+      --sev-medium: #F59E0B;
+      --sev-low: #3B82F6;
+      --sev-info: #64748B;
+      --editor-size: 13px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    body.compact { font-size: 13px; }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+
+    /* Header */
+    header {
+      background: rgba(17, 24, 39, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 0.75rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 40;
+    }
+    .brand { display: flex; align-items: center; gap: 0.6rem; font-weight: 700; font-size: 1.05rem; }
+    .brand-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 12px var(--accent); }
+    nav { display: flex; gap: 0.4rem; }
+    .nav-btn {
+      background: transparent; border: 1px solid transparent; color: var(--muted);
+      padding: 0.45rem 0.85rem; border-radius: 8px; cursor: pointer; font-size: 0.875rem; font-weight: 500;
+      transition: all 150ms ease;
+    }
+    .nav-btn:hover { color: var(--text); background: var(--elevated); }
+    .nav-btn.active { color: var(--text); background: rgba(124, 108, 255, 0.15); border-color: rgba(124, 108, 255, 0.4); }
+
+    .header-actions { display: flex; align-items: center; gap: 0.6rem; }
+    .kbd-hint {
+      font-size: 0.75rem; color: var(--muted); background: var(--elevated);
+      border: 1px solid var(--border); padding: 0.25rem 0.5rem; border-radius: 6px; cursor: pointer;
+    }
+    .btn {
+      background: var(--accent); color: #fff; border: none; padding: 0.5rem 1rem;
+      border-radius: 8px; font-weight: 600; font-size: 0.875rem; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 0.4rem; transition: transform 150ms ease, opacity 150ms ease;
+    }
+    .btn:hover { transform: translateY(-1px); opacity: 0.95; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .btn-ghost { background: var(--elevated); border: 1px solid var(--border); color: var(--text); }
+    .btn-sm { padding: 0.3rem 0.65rem; font-size: 0.78rem; }
+
+    /* Main container */
+    main { flex: 1; padding: 1.25rem 1.5rem; max-width: 1440px; width: 100%; margin: 0 auto; }
+    .page { display: none; }
+    .page.active { display: block; animation: fadeIn 180ms ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+    .glass-card {
+      background: rgba(17, 24, 39, 0.7);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem;
+    }
+
+    /* Stepper */
+    .stepper { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+    .step-pill {
+      flex: 1; min-width: 130px; padding: 0.55rem 0.75rem; border-radius: 8px;
+      background: var(--surface); border: 1px solid var(--border); font-size: 0.8rem;
+      display: flex; align-items: center; gap: 0.5rem; color: var(--muted); transition: all 200ms ease;
+    }
+    .step-pill.active { border-color: var(--accent); color: var(--text); background: rgba(124, 108, 255, 0.12); }
+    .step-pill.done { border-color: #10B981; color: #34D399; }
+    .step-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+
+    /* Workbench grid */
+    .workbench { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 1rem; }
+    .workbench.stacked { grid-template-columns: 1fr; }
+    @media (max-width: 960px) { .workbench { grid-template-columns: 1fr; } }
+
+    .toolbar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.75rem; }
+    select, input[type="text"], input[type="password"], input[type="email"] {
+      background: var(--elevated); color: var(--text); border: 1px solid var(--border);
+      border-radius: 8px; padding: 0.45rem 0.7rem; font-size: 0.85rem; outline: none;
+    }
+    select:focus, input:focus, textarea:focus { border-color: var(--accent); }
+
+    textarea.code-editor {
+      width: 100%; min-height: 440px; background: #070A10; color: #E5E7EB;
+      border: 1px solid var(--border); border-radius: 10px; padding: 1rem;
+      font-family: 'JetBrains Mono', monospace; font-size: var(--editor-size);
+      line-height: 1.55; resize: vertical; outline: none; tab-size: 4;
+    }
+
+    /* Dashboard summary row */
+    .summary-bar { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.85rem; }
+    .score-ring {
+      width: 64px; height: 64px; border-radius: 50%;
+      background: conic-gradient(var(--accent) calc(var(--score, 0) * 1%), var(--elevated) 0);
+      display: grid; place-items: center; flex-shrink: 0;
+    }
+    .score-inner {
+      width: 50px; height: 50px; border-radius: 50%; background: var(--surface);
+      display: grid; place-items: center; font-weight: 700; font-size: 1rem;
+    }
+
+    /* Filter chips */
+    .chips { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+    .chip {
+      padding: 0.25rem 0.6rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600;
+      border: 1px solid var(--border); background: var(--elevated); color: var(--muted); cursor: pointer;
+    }
+    .chip.active { border-color: var(--accent); color: var(--text); background: rgba(124, 108, 255, 0.2); }
+
+    /* Finding cards */
+    .findings-list { display: flex; flex-direction: column; gap: 0.65rem; max-height: 460px; overflow-y: auto; padding-right: 4px; }
+    .finding-card {
+      background: var(--elevated); border: 1px solid var(--border); border-left: 4px solid var(--sev-info);
+      border-radius: 10px; padding: 0.85rem; transition: transform 150ms ease, box-shadow 150ms ease;
+    }
+    .finding-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.3); }
+    .sev-critical { border-left-color: var(--sev-critical); }
+    .sev-high { border-left-color: var(--sev-high); }
+    .sev-medium { border-left-color: var(--sev-medium); }
+    .sev-low { border-left-color: var(--sev-low); }
+
+    .badge {
+      display: inline-block; padding: 0.15rem 0.45rem; border-radius: 5px;
+      font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+    }
+    .badge-critical { background: rgba(239,68,68,0.18); color: #FCA5A5; }
+    .badge-high { background: rgba(249,115,22,0.18); color: #FDBA74; }
+    .badge-medium { background: rgba(245,158,11,0.18); color: #FCD34D; }
+    .badge-low { background: rgba(59,130,246,0.18); color: #93C5FD; }
+    .badge-info { background: rgba(100,116,139,0.2); color: #CBD5E1; }
+
+    /* Modal / Command Palette */
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.65); backdrop-filter: blur(4px);
+      display: none; place-items: center; z-index: 100;
+    }
+    .modal-backdrop.open { display: grid; }
+    .palette {
+      width: min(540px, 92vw); background: var(--surface); border: 1px solid var(--border);
+      border-radius: 14px; overflow: hidden; box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+    }
+    .palette input { width: 100%; border: none; border-bottom: 1px solid var(--border); border-radius: 0; padding: 0.9rem 1rem; font-size: 0.95rem; background: var(--surface); }
+    .palette-list { max-height: 280px; overflow-y: auto; padding: 0.4rem; }
+    .palette-item {
+      padding: 0.6rem 0.85rem; border-radius: 8px; cursor: pointer; display: flex;
+      justify-content: space-between; font-size: 0.875rem;
+    }
+    .palette-item:hover { background: rgba(124, 108, 255, 0.16); }
+
+    /* Toast */
+    .toast {
+      position: fixed; bottom: 1.25rem; right: 1.25rem; background: var(--elevated);
+      border: 1px solid var(--accent); padding: 0.7rem 1rem; border-radius: 10px;
+      font-size: 0.85rem; z-index: 120; display: none; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    .toast.show { display: block; animation: fadeIn 150ms ease; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    th, td { text-align: left; padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <span>CodeLens</span>
+    </div>
+    <nav aria-label="Main navigation">
+      <button class="nav-btn active" data-page="workbench">Workbench</button>
+      <button class="nav-btn" data-page="history">History</button>
+      <button class="nav-btn" data-page="playground">API Playground</button>
+      <button class="nav-btn" data-page="keys">API Keys</button>
+      <button class="nav-btn" data-page="settings">Settings</button>
+    </nav>
+    <div class="header-actions">
+      <button class="kbd-hint" onclick="togglePalette()" title="Command Palette">⌘K</button>
+      <span id="authBadge" style="font-size:0.8rem;color:var(--muted);">Guest</span>
+      <button class="btn btn-ghost btn-sm" id="authModalBtn" onclick="openAuthModal()">Sign In</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- WORKBENCH PAGE -->
+    <section id="page-workbench" class="page active">
+      <div class="stepper" id="stepper" aria-live="polite">
+        <div class="step-pill" data-step="0"><span class="step-dot"></span>Parsing</div>
+        <div class="step-pill" data-step="1"><span class="step-dot"></span>Static checks</div>
+        <div class="step-pill" data-step="2"><span class="step-dot"></span>AI analysis</div>
+        <div class="step-pill" data-step="3"><span class="step-dot"></span>Merging results</div>
+        <div class="step-pill" data-step="4"><span class="step-dot"></span>Generating fixes</div>
+      </div>
+
+      <div class="workbench" id="workbenchGrid">
+        <!-- Left: Code Editor -->
+        <div class="glass-card">
+          <div class="toolbar">
+            <select id="languageSelect" aria-label="Language">
+              <option value="python">Python</option>
+              <option value="javascript">JavaScript</option>
+              <option value="typescript">TypeScript</option>
+              <option value="php">PHP</option>
+              <option value="cpp">C++</option>
+              <option value="java">Java</option>
+              <option value="go">Go</option>
+              <option value="sql">SQL</option>
+            </select>
+            <select id="sampleSelect" onchange="loadSample(this.value)" aria-label="Load sample code">
+              <option value="">Load Sample Code...</option>
+              <option value="python">Buggy Python (SQLi + Bare Except)</option>
+              <option value="php">SQL Injection in PHP</option>
+              <option value="cpp">Memory Leak & Overflow in C++</option>
+            </select>
+            <label class="btn btn-ghost btn-sm" style="cursor:pointer;">
+              Upload File
+              <input type="file" hidden onchange="handleFileUpload(event)" />
+            </label>
+            <button class="btn" id="runBtn" onclick="runReview()" style="margin-left:auto;">
+              ▶ Run Review (Ctrl+Enter)
+            </button>
+          </div>
+          <textarea id="codeEditor" class="code-editor" spellcheck="false" placeholder="Paste or drop your code here..."></textarea>
+        </div>
+
+        <!-- Right: Findings & Dashboard -->
+        <div class="glass-card">
+          <div class="summary-bar">
+            <div class="score-ring" id="scoreRing" style="--score: 0;">
+              <div class="score-inner" id="scoreText">—</div>
+            </div>
+            <div>
+              <div style="font-weight:700;font-size:1rem;" id="summaryTitle">Ready to review</div>
+              <div style="font-size:0.82rem;color:var(--muted);margin-top:0.2rem;" id="summaryDesc">
+                Submit code to stream live security, quality &amp; performance findings.
+              </div>
+            </div>
+          </div>
+
+          <div class="toolbar">
+            <input type="text" id="searchFindings" placeholder="Search findings..." oninput="renderFindings()" style="flex:1;" />
+            <select id="sortFindings" onchange="renderFindings()">
+              <option value="severity">Sort: Severity</option>
+              <option value="line">Sort: Line #</option>
+            </select>
+          </div>
+
+          <div class="chips" id="sevChips">
+            <button class="chip active" data-sev="all" onclick="setSevFilter('all')">All (<span id="cnt-all">0</span>)</button>
+            <button class="chip" data-sev="critical" onclick="setSevFilter('critical')">Critical (<span id="cnt-critical">0</span>)</button>
+            <button class="chip" data-sev="high" onclick="setSevFilter('high')">High (<span id="cnt-high">0</span>)</button>
+            <button class="chip" data-sev="medium" onclick="setSevFilter('medium')">Medium (<span id="cnt-medium">0</span>)</button>
+            <button class="chip" data-sev="low" onclick="setSevFilter('low')">Low (<span id="cnt-low">0</span>)</button>
+          </div>
+
+          <div class="findings-list" id="findingsList">
+            <div style="text-align:center;color:var(--muted);padding:2.5rem 1rem;font-size:0.875rem;">
+              No findings yet. Pick a sample or paste code and click <strong>Run Review</strong>.
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- HISTORY PAGE -->
+    <section id="page-history" class="page">
+      <div class="glass-card">
+        <div class="toolbar" style="justify-content:space-between;">
+          <h2>Review History</h2>
+          <button class="btn btn-ghost btn-sm" onclick="loadHistory()">↻ Refresh</button>
+        </div>
+        <table>
+          <thead>
+            <tr><th>ID</th><th>Language</th><th>Status</th><th>Score</th><th>Summary</th><th>Action</th></tr>
+          </thead>
+          <tbody id="historyBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- API PLAYGROUND PAGE -->
+    <section id="page-playground" class="page">
+      <div class="glass-card">
+        <h2 style="margin-bottom:0.85rem;">API Playground</h2>
+        <div class="toolbar">
+          <select id="pgEndpoint">
+            <option value="GET /api/health">GET /api/health</option>
+            <option value="GET /api/reviews">GET /api/reviews</option>
+            <option value="POST /api/reviews">POST /api/reviews</option>
+          </select>
+          <button class="btn" onclick="sendPlayground()">Send Request</button>
+          <span id="pgStatus" style="font-size:0.85rem;color:var(--accent-cyan);"></span>
+        </div>
+        <div class="workbench" style="margin-top:0.5rem;">
+          <div>
+            <div style="font-size:0.8rem;color:var(--muted);margin-bottom:0.35rem;">Request Body (JSON)</div>
+            <textarea id="pgBody" class="code-editor" style="min-height:220px;">{
+  "language": "python",
+  "code": "eval(input())"
+}</textarea>
+          </div>
+          <div>
+            <div style="font-size:0.8rem;color:var(--muted);margin-bottom:0.35rem;">Response</div>
+            <textarea id="pgResponse" class="code-editor" style="min-height:220px;" readonly></textarea>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- API KEYS PAGE -->
+    <section id="page-keys" class="page">
+      <div class="glass-card">
+        <h2 style="margin-bottom:0.5rem;">API Keys</h2>
+        <p style="font-size:0.85rem;color:var(--muted);margin-bottom:1rem;">Sign in to create and manage API keys for CI/CD integrations.</p>
+        <div class="toolbar">
+          <input type="text" id="newKeyName" placeholder="Key name (e.g. GitHub Actions)" />
+          <button class="btn" onclick="createApiKey()">+ Create Key</button>
+        </div>
+        <div id="createdKeyBanner" style="display:none;background:rgba(16,185,129,0.12);border:1px solid #10B981;padding:0.75rem;border-radius:8px;margin-bottom:1rem;font-size:0.85rem;"></div>
+        <table>
+          <thead><tr><th>Name</th><th>Prefix</th><th>Created</th><th>Action</th></tr></thead>
+          <tbody id="keysBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SETTINGS PAGE -->
+    <section id="page-settings" class="page">
+      <div class="glass-card" style="max-width:560px;">
+        <h2 style="margin-bottom:1rem;">Personalisation Settings</h2>
+        <div style="display:flex;flex-direction:column;gap:1rem;">
+          <label style="display:flex;justify-content:space-between;align-items:center;">
+            <span>UI Density</span>
+            <select id="prefDensity" onchange="savePrefs()">
+              <option value="comfortable">Comfortable</option>
+              <option value="compact">Compact</option>
+            </select>
+          </label>
+          <label style="display:flex;justify-content:space-between;align-items:center;">
+            <span>Editor Font Size</span>
+            <select id="prefFontSize" onchange="savePrefs()">
+              <option value="12px">12px</option>
+              <option value="13px" selected>13px</option>
+              <option value="15px">15px</option>
+              <option value="17px">17px</option>
+            </select>
+          </label>
+          <label style="display:flex;justify-content:space-between;align-items:center;">
+            <span>Split View Layout</span>
+            <select id="prefSplit" onchange="savePrefs()">
+              <option value="side">Side-by-Side</option>
+              <option value="stacked">Stacked</option>
+            </select>
+          </label>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- COMMAND PALETTE -->
+  <div class="modal-backdrop" id="paletteModal" onclick="if(event.target===this)togglePalette()">
+    <div class="palette">
+      <input type="text" id="paletteInput" placeholder="Type a command..." oninput="filterPalette()" />
+      <div class="palette-list" id="paletteList"></div>
+    </div>
+  </div>
+
+  <!-- AUTH MODAL -->
+  <div class="modal-backdrop" id="authModal" onclick="if(event.target===this)closeAuthModal()">
+    <div class="palette" style="padding:1.25rem;width:min(380px,92vw);">
+      <h3 style="margin-bottom:0.85rem;">Sign In / Register</h3>
+      <div style="display:flex;flex-direction:column;gap:0.65rem;">
+        <input type="email" id="authEmail" placeholder="Email address" />
+        <input type="password" id="authPassword" placeholder="Password" />
+        <div style="display:flex;gap:0.5rem;margin-top:0.25rem;">
+          <button class="btn" style="flex:1;" onclick="submitAuth('login')">Sign In</button>
+          <button class="btn btn-ghost" style="flex:1;" onclick="submitAuth('register')">Register</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const SAMPLES = {
+      python: `import sqlite3\n\ndef get_user(username):\n    conn = sqlite3.connect("users.db")\n    cursor = conn.cursor()\n    query = "SELECT * FROM users WHERE username = '" + username + "'"\n    cursor.execute(query)\n    return cursor.fetchone()\n\ndef divide(a, b):\n    try:\n        return a / b\n    except:\n        pass\n\npassword = "hunter2"\nprint(password)`,
+      php: `<?php\n$id = $_GET['id'];\n$result = mysqli_query($conn, "SELECT * FROM products WHERE id = $id");\n$password = md5($_POST['password']);\necho $result;\n?>`,
+      cpp: `#include <iostream>\nvoid leak() {\n    int* p = new int[100];\n}\nint main() {\n    int arr[5];\n    arr[10] = 42;\n    leak();\n    return 0;\n}`
+    };
+
+    let currentFindings = [];
+    let sevFilter = 'all';
+    let token = localStorage.getItem('cs_token') || '';
+
+    // Navigation
+    document.querySelectorAll('.nav-btn').forEach(btn => {
+      btn.addEventListener('click', () => switchPage(btn.dataset.page));
+    });
+
+    function switchPage(page) {
+      document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.page === page));
+      document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id === 'page-' + page));
+      if (page === 'history') loadHistory();
+      if (page === 'keys') loadKeys();
+    }
+
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 3000);
+    }
+
+    function loadSample(lang) {
+      if (!lang) return;
+      document.getElementById('languageSelect').value = lang;
+      document.getElementById('codeEditor').value = SAMPLES[lang] || '';
+      showToast('Loaded ' + lang + ' sample');
+    }
+
+    function handleFileUpload(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = ev => {
+        document.getElementById('codeEditor').value = ev.target.result;
+        showToast('Loaded ' + file.name);
+      };
+      reader.readAsText(file);
+    }
+
+    async function runReview() {
+      const code = document.getElementById('codeEditor').value.trim();
+      const language = document.getElementById('languageSelect').value;
+      if (!code) return showToast('Please paste some code first');
+
+      const btn = document.getElementById('runBtn');
+      btn.disabled = true;
+      currentFindings = [];
+      renderFindings();
+      updateStepper(-1);
+      document.getElementById('summaryTitle').textContent = 'Running analysis...';
+      document.getElementById('summaryDesc').textContent = 'Streaming live progress and findings from Gemini...';
+      document.getElementById('scoreText').textContent = '...';
+
+      try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = 'Bearer ' + token;
+        const res = await fetch('/api/reviews', {
+          method: 'POST', headers, body: JSON.stringify({ code, language })
+        });
+        const data = await res.json();
+        const es = new EventSource(data.stream_url);
+
+        es.onmessage = (ev) => {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'progress') {
+            updateStepper(msg.index);
+          } else if (msg.type === 'finding') {
+            currentFindings.push(msg);
+            renderFindings();
+          } else if (msg.type === 'complete') {
+            updateStepper(5);
+            document.getElementById('scoreText').textContent = msg.score;
+            document.getElementById('scoreRing').style.setProperty('--score', msg.score);
+            document.getElementById('summaryTitle').textContent = 'Review Complete';
+            document.getElementById('summaryDesc').textContent = msg.summary || 'Analysis finished.';
+            btn.disabled = false;
+            es.close();
+          } else if (msg.type === 'error') {
+            showToast('Error: ' + msg.message);
+            document.getElementById('summaryTitle').textContent = 'Review Failed';
+            document.getElementById('summaryDesc').textContent = msg.message;
+            btn.disabled = false;
+            es.close();
+          }
+        };
+        es.onerror = () => { btn.disabled = false; es.close(); };
+      } catch (err) {
+        showToast('Failed to start review');
+        btn.disabled = false;
+      }
+    }
+
+    function updateStepper(activeIdx) {
+      document.querySelectorAll('#stepper .step-pill').forEach((el, idx) => {
+        el.classList.remove('active', 'done');
+        if (idx < activeIdx) el.classList.add('done');
+        else if (idx === activeIdx) el.classList.add('active');
+      });
+    }
+
+    function setSevFilter(sev) {
+      sevFilter = sev;
+      document.querySelectorAll('#sevChips .chip').forEach(c => c.classList.toggle('active', c.dataset.sev === sev));
+      renderFindings();
+    }
+
+    function renderFindings() {
+      const counts = { all: currentFindings.length, critical: 0, high: 0, medium: 0, low: 0 };
+      currentFindings.forEach(f => { if (counts[f.severity] !== undefined) counts[f.severity]++; });
+      Object.entries(counts).forEach(([k, v]) => {
+        const el = document.getElementById('cnt-' + k);
+        if (el) el.textContent = v;
+      });
+
+      const query = document.getElementById('searchFindings').value.toLowerCase();
+      const sortBy = document.getElementById('sortFindings').value;
+      const rank = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+
+      let filtered = currentFindings.filter(f => {
+        if (sevFilter !== 'all' && f.severity !== sevFilter) return false;
+        if (query && !(f.title + ' ' + f.description).toLowerCase().includes(query)) return false;
+        return true;
+      });
+
+      filtered.sort((a, b) => sortBy === 'line'
+        ? (a.line_start || 9999) - (b.line_start || 9999)
+        : (rank[a.severity] ?? 5) - (rank[b.severity] ?? 5));
+
+      const list = document.getElementById('findingsList');
+      if (!filtered.length) {
+        list.innerHTML = '<div style="text-align:center;color:var(--muted);padding:2rem;font-size:0.85rem;">No matching findings.</div>';
+        return;
+      }
+
+      list.innerHTML = filtered.map(f => `
+        <div class="finding-card sev-${f.severity || 'info'}">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;margin-bottom:0.35rem;">
+            <span style="font-weight:600;font-size:0.9rem;">${escapeHtml(f.title || 'Issue')}</span>
+            <span class="badge badge-${f.severity || 'info'}">${escapeHtml(f.severity || 'info')}</span>
+          </div>
+          <div style="font-size:0.78rem;color:var(--accent-cyan);margin-bottom:0.4rem;">
+            ${f.line_start ? 'Line ' + f.line_start : 'General'} · ${escapeHtml(f.category || 'quality')}
+          </div>
+          <p style="font-size:0.83rem;color:#D1D5DB;line-height:1.45;margin-bottom:0.5rem;">${escapeHtml(f.description || '')}</p>
+          ${f.fix ? `<div class="mono" style="font-size:0.78rem;background:#0B0F17;padding:0.5rem;border-radius:6px;border:1px solid var(--border);color:#A7F3D0;">Fix: ${escapeHtml(f.fix)}</div>` : ''}
+        </div>
+      `).join('');
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, m => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
+    }
+
+    // History
+    async function loadHistory() {
+      const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+      const res = await fetch('/api/reviews', { headers });
+      const rows = await res.json();
+      document.getElementById('historyBody').innerHTML = rows.map(r => `
+        <tr>
+          <td class="mono" style="font-size:0.78rem;">${r.id.slice(0, 8)}</td>
+          <td>${escapeHtml(r.language)}</td>
+          <td>${escapeHtml(r.status)}</td>
+          <td>${r.score ?? '—'}</td>
+          <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(r.summary || '')}</td>
+          <td><button class="btn btn-ghost btn-sm" onclick="openReview('${r.id}')">View</button></td>
+        </tr>
+      `).join('') || '<tr><td colspan="6" style="color:var(--muted);text-align:center;">No reviews yet.</td></tr>';
+    }
+
+    async function openReview(id) {
+      const res = await fetch('/api/reviews/' + id);
+      const data = await res.json();
+      currentFindings = data.findings || [];
+      document.getElementById('scoreText').textContent = data.score ?? '—';
+      document.getElementById('scoreRing').style.setProperty('--score', data.score || 0);
+      document.getElementById('summaryTitle').textContent = 'Loaded Review';
+      document.getElementById('summaryDesc').textContent = data.summary || '';
+      renderFindings();
+      switchPage('workbench');
+    }
+
+    // Playground
+    async function sendPlayground() {
+      const [method, path] = document.getElementById('pgEndpoint').value.split(' ');
+      const opts = { method, headers: { 'Content-Type': 'application/json' } };
+      if (token) opts.headers['Authorization'] = 'Bearer ' + token;
+      if (method === 'POST') opts.body = document.getElementById('pgBody').value;
+      const t0 = performance.now();
+      const res = await fetch(path, opts);
+      const ms = Math.round(performance.now() - t0);
+      document.getElementById('pgStatus').textContent = `${res.status} ${res.statusText} · ${ms} ms`;
+      const text = await res.text();
+      try { document.getElementById('pgResponse').value = JSON.stringify(JSON.parse(text), null, 2); }
+      catch { document.getElementById('pgResponse').value = text; }
+    }
+
+    // Auth
+    function openAuthModal() { document.getElementById('authModal').classList.add('open'); }
+    function closeAuthModal() { document.getElementById('authModal').classList.remove('open'); }
+    async function submitAuth(mode) {
+      const email = document.getElementById('authEmail').value;
+      const password = document.getElementById('authPassword').value;
+      const res = await fetch('/api/auth/' + mode, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await res.json();
+      if (!res.ok) return showToast(data.detail || 'Auth failed');
+      token = data.access_token;
+      localStorage.setItem('cs_token', token);
+      document.getElementById('authBadge').textContent = data.user.email;
+      closeAuthModal();
+      showToast('Signed in as ' + data.user.email);
+    }
+
+    // API Keys
+    async function loadKeys() {
+      if (!token) return;
+      const res = await fetch('/api/api-keys', { headers: { 'Authorization': 'Bearer ' + token } });
+      if (!res.ok) return;
+      const keys = await res.json();
+      document.getElementById('keysBody').innerHTML = keys.map(k => `
+        <tr>
+          <td>${escapeHtml(k.name)}</td>
+          <td class="mono">${escapeHtml(k.prefix)}...</td>
+          <td>${new Date(k.created_at).toLocaleDateString()}</td>
+          <td><button class="btn btn-ghost btn-sm" onclick="revokeKey('${k.id}')">Revoke</button></td>
+        </tr>
+      `).join('');
+    }
+    async function createApiKey() {
+      if (!token) return openAuthModal();
+      const name = document.getElementById('newKeyName').value || 'Default Key';
+      const res = await fetch('/api/api-keys', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ name })
+      });
+      const data = await res.json();
+      const banner = document.getElementById('createdKeyBanner');
+      banner.style.display = 'block';
+      banner.innerHTML = `New key (copy now, shown once): <code class="mono">${data.key}</code>`;
+      loadKeys();
+    }
+    async function revokeKey(id) {
+      await fetch('/api/api-keys/' + id, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + token } });
+      loadKeys();
+    }
+
+    // Settings
+    function savePrefs() {
+      const prefs = {
+        density: document.getElementById('prefDensity').value,
+        fontSize: document.getElementById('prefFontSize').value,
+        split: document.getElementById('prefSplit').value
+      };
+      localStorage.setItem('cs_prefs', JSON.stringify(prefs));
+      applyPrefs(prefs);
+    }
+    function applyPrefs(prefs) {
+      document.body.classList.toggle('compact', prefs.density === 'compact');
+      document.documentElement.style.setProperty('--editor-size', prefs.fontSize || '13px');
+      document.getElementById('workbenchGrid').classList.toggle('stacked', prefs.split === 'stacked');
+    }
+
+    // Command Palette
+    const COMMANDS = [
+      { label: 'Run Code Review', hint: 'Ctrl+Enter', action: runReview },
+      { label: 'Go to Workbench', hint: 'Page', action: () => switchPage('workbench') },
+      { label: 'Go to History', hint: 'Page', action: () => switchPage('history') },
+      { label: 'Go to API Playground', hint: 'Page', action: () => switchPage('playground') },
+      { label: 'Go to API Keys', hint: 'Page', action: () => switchPage('keys') },
+      { label: 'Go to Settings', hint: 'Page', action: () => switchPage('settings') },
+      { label: 'Load Buggy Python Sample', hint: 'Sample', action: () => loadSample('python') }
+    ];
+    function togglePalette() {
+      const m = document.getElementById('paletteModal');
+      m.classList.toggle('open');
+      if (m.classList.contains('open')) {
+        document.getElementById('paletteInput').value = '';
+        filterPalette();
+        document.getElementById('paletteInput').focus();
+      }
+    }
+    function filterPalette() {
+      const q = document.getElementById('paletteInput').value.toLowerCase();
+      const list = document.getElementById('paletteList');
+      list.innerHTML = '';
+      COMMANDS.filter(c => c.label.toLowerCase().includes(q)).forEach(c => {
+        const div = document.createElement('div');
+        div.className = 'palette-item';
+        div.innerHTML = `<span>${c.label}</span><span style="color:var(--muted);font-size:0.78rem;">${c.hint}</span>`;
+        div.onclick = () => { togglePalette(); c.action(); };
+        list.appendChild(div);
+      });
+    }
+
+    document.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); togglePalette(); }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); runReview(); }
+    });
+
+    // Init
+    (async function init() {
+      const saved = JSON.parse(localStorage.getItem('cs_prefs') || '{}');
+      if (saved.density) document.getElementById('prefDensity').value = saved.density;
+      if (saved.fontSize) document.getElementById('prefFontSize').value = saved.fontSize;
+      if (saved.split) document.getElementById('prefSplit').value = saved.split;
+      applyPrefs(saved);
+      loadSample('python');
+      if (token) {
+        const res = await fetch('/api/auth/me', { headers: { 'Authorization': 'Bearer ' + token } });
+        if (res.ok) { const u = await res.json(); document.getElementById('authBadge').textContent = u.email; }
+      }
+    })();
+  </script>
+</body>
+</html>
