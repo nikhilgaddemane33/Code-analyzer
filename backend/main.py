@@ -9,12 +9,12 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 from fastapi import FastAPI, Depends, HTTPException, Header, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 from database import engine, get_db, Base
-import models, schemas, auth, gemini_client
+import models, schemas, auth, gemini_client, frontend_html
 
 # Create all tables on startup
 Base.metadata.create_all(bind=engine)
@@ -308,6 +308,14 @@ def health():
 # ════════════════════════════════════════════════════════════════
 #  SERVE FRONTEND (must be last)
 # ════════════════════════════════════════════════════════════════
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+def serve_index():
+    local_html = os.path.join(os.path.dirname(__file__), "..", "frontend", "index.html")
+    if os.path.isfile(local_html):
+        with open(local_html, "r", encoding="utf-8") as f:
+            return f.read()
+    return frontend_html.INDEX_HTML
 
 frontend_path = os.path.join(os.path.dirname(__file__), "..", "frontend")
 static_path = os.path.join(os.path.dirname(__file__), "static")
