@@ -95,6 +95,19 @@ async def create_review(
     queue: asyncio.Queue = asyncio.Queue()
     _sse_queues[review_id] = queue
 
+    # On Vercel serverless, run inline so response includes full results (no cross-instance /tmp loss)
+    if os.getenv("VERCEL"):
+        await _run_pipeline(review_id, body.code, body.language, queue)
+        rev = db.query(models.Review).filter(models.Review.id == review_id).first()
+        return {
+            "id": review_id,
+            "status": rev.status if rev else "completed",
+            "score": rev.score if rev else 50,
+            "summary": rev.summary if rev else "",
+            "findings": json.loads(rev.findings_json or "[]") if rev else [],
+            "stream_url": f"/api/reviews/{review_id}/stream",
+        }
+
     background_tasks.add_task(
         _run_pipeline, review_id, body.code, body.language, queue
     )
@@ -165,8 +178,9 @@ async def _run_pipeline(review_id: str, code: str, language: str, queue: asyncio
             db.commit()
     finally:
         db.close()
-        # Keep queue for 60 s then clean up
-        await asyncio.sleep(60)
+        if not os.getenv("VERCEL"):
+            # Keep queue for 60 s for SSE reconnects, then clean up
+            await asyncio.sleep(60)
         _sse_queues.pop(review_id, None)
 
 
@@ -296,5 +310,7 @@ def health():
 # ════════════════════════════════════════════════════════════════
 
 frontend_path = os.path.join(os.path.dirname(__file__), "..", "frontend")
-if os.path.isdir(frontend_path):
-    app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
+static_path = os.path.join(os.path.dirname(__file__), "static")
+serve_dir = frontend_path if os.path.isdir(frontend_path) else static_path
+if os.path.isdir(serve_dir):
+    app.mount("/", StaticFiles(directory=serve_dir, html=True), name="frontend")

@@ -480,6 +480,17 @@
           method: 'POST', headers, body: JSON.stringify({ code, language })
         });
         const data = await res.json();
+        if (data.status === 'completed') {
+          updateStepper(5);
+          currentFindings = data.findings || [];
+          renderFindings();
+          document.getElementById('scoreText').textContent = data.score ?? 50;
+          document.getElementById('scoreRing').style.setProperty('--score', data.score ?? 50);
+          document.getElementById('summaryTitle').textContent = 'Review Complete';
+          document.getElementById('summaryDesc').textContent = data.summary || 'Analysis finished.';
+          btn.disabled = false;
+          return;
+        }
         const es = new EventSource(data.stream_url);
 
         es.onmessage = (ev) => {
